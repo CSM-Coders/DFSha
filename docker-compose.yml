@@ -1,0 +1,68 @@
+
+services:
+  control_node:
+    build: ./control_node
+    ports:
+      - "8000:8000"
+    volumes:
+      - control_node_data:/data
+    networks:
+      - dfsha_net
+
+  datanode1:
+    build: ./data_node
+    ports:
+      - "6001:6000"
+    environment:
+      - NODE_ID=datanode1
+      - NODE_ADDR=localhost:6001
+      - INTERNAL_ADDR=datanode1:6000
+      - CONTROL_NODE_URL=http://control_node:8000
+    volumes:
+      - datanode1_data:/data
+    depends_on:
+      - control_node
+    networks:
+      - dfsha_net
+
+  datanode2:
+    build: ./data_node
+    ports:
+      - "6002:6000"
+    environment:
+      - NODE_ID=datanode2
+      - NODE_ADDR=localhost:6002
+      - INTERNAL_ADDR=datanode2:6000
+      - CONTROL_NODE_URL=http://control_node:8000
+    volumes:
+      - datanode2_data:/data
+    depends_on:
+      - control_node
+    networks:
+      - dfsha_net
+
+  datanode3:
+    build: ./data_node
+    ports:
+      - "6003:6000"
+    environment:
+      - NODE_ID=datanode3
+      - NODE_ADDR=localhost:6003
+      - INTERNAL_ADDR=datanode3:6000
+      - CONTROL_NODE_URL=http://control_node:8000
+    volumes:
+      - datanode3_data:/data
+    depends_on:
+      - control_node
+    networks:
+      - dfsha_net
+
+networks:
+  dfsha_net:
+    driver: bridge
+
+volumes:
+  control_node_data:
+  datanode1_data:
+  datanode2_data:
+  datanode3_data:
