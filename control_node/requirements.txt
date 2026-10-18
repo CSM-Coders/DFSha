@@ -3,3 +3,6 @@ uvicorn==0.30.6
 pydantic==2.9.2
 grpcio==1.84.0
 protobuf==7.36.2
+httpx==0.27.2
+pysyncobj==0.3.17
+cryptography==50.0.2
