@@ -1,0 +1,5 @@
+# copia este archivo a terraform.tfvars y ajusta los valores (terraform.tfvars no se sube a git)
+region     = "us-east-1"
+admin_cidr = "203.0.113.7/32"   # TU IP publica: curl -s https://checkip.amazonaws.com  (con /32)
+
+# opcionales: clients_cidr = "0.0.0.0/0", data_node_count = 3, control_instance_type = "t3.small", data_instance_type = "t3.small", data_volume_gb = 30
