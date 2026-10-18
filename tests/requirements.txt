@@ -1,0 +1,3 @@
+-r ../client/requirements.txt
+-r ../control_node/requirements.txt
+pytest==8.3.3
