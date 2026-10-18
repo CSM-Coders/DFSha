@@ -1,18 +1,44 @@
-# macOS
+# macos
 .DS_Store
+__MACOSX/
+._*
+.claude/
 
-# Python
+# python
 __pycache__/
 *.pyc
+.pytest_cache/
+.native-test/
 .venv/
 venv/
 
-# Base de datos local del ControlNode (si se corre fuera de Docker)
+# base de datos local del control node (si se corre fuera de docker)
 *.db
 
-# Secretos y config local
+# secretos y configuración local
 .env
 
-# Editores
+# editores
 .vscode/
 .idea/
+
+# descargas parciales del cliente
+*.part
+
+# pki local (claves privadas), se genera con scripts/gen_certs.py
+certs/
+
+# despliegue en varias vms: secretos y certificados
+deploy/*/.env
+deploy/*/certs/
+
+# terraform: estado (tiene secretos y claves), variables locales y archivos generados
+deploy/terraform/.terraform/
+deploy/terraform/.build/
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/terraform.tfvars
+deploy/terraform/dfsha-lab.pem
+deploy/terraform/crash.log
+deploy/terraform/tfplan
+deploy/terraform/.ultimo_caido
