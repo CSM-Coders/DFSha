@@ -1,68 +1,132 @@
+# cluster dfsha: 3 control nodes (raft) + 3 datanodes, todo con tls: los control nodes están en https://localhost:8001, :8002 y :8003 (cualquiera sirve porque los seguidores reenvían al líder) y los datanodes en localhost:6001, :6002 y :6003 (grpc con tls, el puerto interno 6100 con mtls no se publica); antes de levantar hay que correr python scripts/gen_certs.py (o scripts/start.sh que lo hace solo); el secreto del cluster firma los tokens, autentica a los datanodes y cifra el tráfico raft y los bloques en disco, se cambia en .env (ver .env.example)
+
+x-control: &control
+  build: ./control_node
+  networks: [dfsha_net]
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request,ssl; urllib.request.urlopen('https://localhost:8000/health', context=ssl.create_default_context(cafile='/certs/ca.crt'))"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+
+x-control-env: &control-env
+  CLUSTER_SECRET: ${CLUSTER_SECRET:?Ejecuta scripts/start.sh para generar .env o define CLUSTER_SECRET}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  TLS_CA: /certs/ca.crt
+
+x-datanode: &datanode
+  build: ./data_node
+  networks: [dfsha_net]
+  restart: unless-stopped
+  depends_on: [control1, control2, control3]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 6000), 3)"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 10s
+
+x-datanode-env: &datanode-env
+  CLUSTER_SECRET: ${CLUSTER_SECRET:?Ejecuta scripts/start.sh para generar .env o define CLUSTER_SECRET}
+  DATA_KEY: ${DATA_KEY:-}
+  CONTROL_NODE_URLS: https://control1:8000,https://control2:8000,https://control3:8000
+  TLS_CA: /certs/ca.crt
 
 services:
-  control_node:
-    build: ./control_node
-    ports:
-      - "8000:8000"
-    volumes:
-      - control_node_data:/data
-    networks:
-      - dfsha_net
+  control1:
+    <<: *control
+    ports: ["8001:8000"]
+    environment:
+      <<: *control-env
+      RAFT_SELF: control1:4321
+      RAFT_PEERS: control2:4321,control3:4321
+      TLS_CERT: /certs/control1.crt
+      TLS_KEY: /certs/control1.key
+    volumes: [control1_data:/data, "./certs:/certs:ro"]
+
+  control2:
+    <<: *control
+    ports: ["8002:8000"]
+    environment:
+      <<: *control-env
+      RAFT_SELF: control2:4321
+      RAFT_PEERS: control1:4321,control3:4321
+      TLS_CERT: /certs/control2.crt
+      TLS_KEY: /certs/control2.key
+    volumes: [control2_data:/data, "./certs:/certs:ro"]
+
+  control3:
+    <<: *control
+    ports: ["8003:8000"]
+    environment:
+      <<: *control-env
+      RAFT_SELF: control3:4321
+      RAFT_PEERS: control1:4321,control2:4321
+      TLS_CERT: /certs/control3.crt
+      TLS_KEY: /certs/control3.key
+    volumes: [control3_data:/data, "./certs:/certs:ro"]
 
   datanode1:
-    build: ./data_node
-    ports:
-      - "6001:6000"
+    <<: *datanode
+    ports: ["6001:6000"]
     environment:
-      - NODE_ID=datanode1
-      - NODE_ADDR=localhost:6001
-      - INTERNAL_ADDR=datanode1:6000
-      - CONTROL_NODE_URL=http://control_node:8000
-    volumes:
-      - datanode1_data:/data
-    depends_on:
-      - control_node
-    networks:
-      - dfsha_net
+      <<: *datanode-env
+      NODE_ID: datanode1
+      NODE_ADDR: localhost:6001
+      INTERNAL_ADDR: datanode1:6100
+      TLS_CERT: /certs/datanode1.crt
+      TLS_KEY: /certs/datanode1.key
+    volumes: [datanode1_data:/data, "./certs:/certs:ro"]
 
   datanode2:
-    build: ./data_node
-    ports:
-      - "6002:6000"
+    <<: *datanode
+    ports: ["6002:6000"]
     environment:
-      - NODE_ID=datanode2
-      - NODE_ADDR=localhost:6002
-      - INTERNAL_ADDR=datanode2:6000
-      - CONTROL_NODE_URL=http://control_node:8000
-    volumes:
-      - datanode2_data:/data
-    depends_on:
-      - control_node
-    networks:
-      - dfsha_net
+      <<: *datanode-env
+      NODE_ID: datanode2
+      NODE_ADDR: localhost:6002
+      INTERNAL_ADDR: datanode2:6100
+      TLS_CERT: /certs/datanode2.crt
+      TLS_KEY: /certs/datanode2.key
+    volumes: [datanode2_data:/data, "./certs:/certs:ro"]
 
   datanode3:
-    build: ./data_node
-    ports:
-      - "6003:6000"
+    <<: *datanode
+    ports: ["6003:6000"]
     environment:
-      - NODE_ID=datanode3
-      - NODE_ADDR=localhost:6003
-      - INTERNAL_ADDR=datanode3:6000
-      - CONTROL_NODE_URL=http://control_node:8000
-    volumes:
-      - datanode3_data:/data
-    depends_on:
-      - control_node
-    networks:
-      - dfsha_net
+      <<: *datanode-env
+      NODE_ID: datanode3
+      NODE_ADDR: localhost:6003
+      INTERNAL_ADDR: datanode3:6100
+      TLS_CERT: /certs/datanode3.crt
+      TLS_KEY: /certs/datanode3.key
+    volumes: [datanode3_data:/data, "./certs:/certs:ro"]
+
+  # cuarto datanode opcional (para probar que se amplía y se rebalancea): docker compose --profile extra up -d datanode4
+  datanode4:
+    <<: *datanode
+    profiles: ["extra"]
+    ports: ["6004:6000"]
+    environment:
+      <<: *datanode-env
+      NODE_ID: datanode4
+      NODE_ADDR: localhost:6004
+      INTERNAL_ADDR: datanode4:6100
+      TLS_CERT: /certs/datanode4.crt
+      TLS_KEY: /certs/datanode4.key
+    volumes: [datanode4_data:/data, "./certs:/certs:ro"]
 
 networks:
   dfsha_net:
     driver: bridge
 
 volumes:
-  control_node_data:
+  control1_data:
+  control2_data:
+  control3_data:
   datanode1_data:
   datanode2_data:
   datanode3_data:
+  datanode4_data:
