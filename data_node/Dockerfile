@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY dfsha_pb2.py dfsha_pb2_grpc.py server.py ./
+COPY dfsha_pb2.py dfsha_pb2_grpc.py dfsha_security.py server.py ./
 
 VOLUME ["/data"]
 
