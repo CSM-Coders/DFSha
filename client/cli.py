@@ -1,6 +1,5 @@
 """
-Cliente DFSha: CLI que habla REST con el ControlNode (metadatos, gestión del
-fs) y gRPC directo con los DataNodes (transferencia real de bloques).
+CLI de DFSha (capa fina sobre dfsha_client.DFShaClient).
 
 Uso:
     python cli.py register <user> <pass>
@@ -8,168 +7,261 @@ Uso:
     python cli.py put <archivo_local> <path_remoto>
     python cli.py get <path_remoto> <archivo_local>
     python cli.py ls [path]
-    python cli.py mkdir <path>
-    python cli.py rm <path>
+    python cli.py rmdir <path>
+
+Árbol de archivos (con -r se opera sobre directorios enteros):
+    python cli.py shell                                  (consola con cd, rutas relativas y autocompletado)
+    python cli.py mkdir [-p] <path>
+    python cli.py mv <origen> <destino>
+    python cli.py cp [-r] <origen> <destino>
+    python cli.py tree [path]
+    python cli.py put [-r] <local> <remoto>      get [-r] <remoto> <local>      rm [-r] <path>
+
+Cuenta y seguridad:
+    python cli.py login <user> <pass> [codigo_2fa]     (o define DFSHA_OTP)
+    python cli.py apikey-login <clave>                  (sustituye a contraseña + 2FA)
+    python cli.py passwd <clave_actual> <clave_nueva>
+    python cli.py logout-all                            (revoca todas tus sesiones)
+    python cli.py 2fa setup | enable <codigo> | disable <pass> [codigo]
+    python cli.py apikey create [etiqueta] | list | revoke <key_id>
+
+Operación (solo el usuario admin):
+    python cli.py status                                (nodos, réplicas, líder Raft)
+
+Compartir (permisos por usuario o grupo, heredados por el árbol):
+    python cli.py share <path> <user:NOMBRE|group:NOMBRE> <r|rw|none>
+    python cli.py acl <path>                            (quién tiene acceso; solo el dueño)
+    python cli.py shared                                (lo que otros compartieron conmigo)
+    python cli.py group create <nombre> | ls | add <nombre> <user> | remove <nombre> <user> | delete <nombre>
+
+Acceso tipo archivo (RF3: open/read/write/close/lock):
+    python cli.py stat <path>
+    python cli.py cat <path>
+    python cli.py read <path> <offset> <largo>       (bytes a stdout)
+    python cli.py write <path> <offset> <texto|->    (escribe en el offset; '-' = stdin; crea si no existe)
+    python cli.py append <path> <texto|->
+    python cli.py truncate <path> <tamaño>
+    python cli.py lock <path> <shared|exclusive> [segundos]   (mantiene el lock ese tiempo)
+
+Variables: CONTROL_NODE_URL (uno o varios ControlNodes separados por coma; por defecto los 3 locales),
+           DFSHA_CA_CERT (CA del cluster para verificar TLS; por defecto certs/ca.crt),
+           DFSHA_BLOCK_SIZE (bytes; opcional, el servidor lo acota).
 """
 import os
 import sys
+import time
 import json
-import hashlib
 
-import grpc
-import requests
+from dfsha_client import DFShaClient, DFShaError, DEFAULT_URLS
 
-import dfsha_pb2
-import dfsha_pb2_grpc
-
-CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", "http://localhost:8000")
+CONTROL_NODE_URL = os.environ.get("CONTROL_NODE_URL", DEFAULT_URLS)
 TOKEN_FILE = os.path.expanduser("~/.dfsha_token")
 
 
-def _headers():
-    if not os.path.exists(TOKEN_FILE):
-        print("No hay sesión. Corre: python cli.py login <user> <pass>")
-        sys.exit(1)
-    with open(TOKEN_FILE) as f:
-        token = f.read().strip()
-    return {"Authorization": f"Bearer {token}"}
+def _client(need_session: bool = True) -> DFShaClient:
+    token = None
+    if need_session:
+        if not os.path.exists(TOKEN_FILE):
+            raise DFShaError("No hay sesión. Corre: python cli.py login <user> <pass>")
+        with open(TOKEN_FILE) as f:
+            token = f.read().strip()
+    return DFShaClient(CONTROL_NODE_URL, token)
 
 
-def cmd_register(user, password):
-    r = requests.post(f"{CONTROL_NODE_URL}/auth/register", json={"username": user, "password": password})
-    r.raise_for_status()
-    print("Usuario creado. Ahora podés hacer login.")
-
-
-def cmd_login(user, password):
-    r = requests.post(f"{CONTROL_NODE_URL}/auth/login", json={"username": user, "password": password})
-    r.raise_for_status()
-    token = r.json()["token"]
-    with open(TOKEN_FILE, "w") as f:
+def _save_token(token: str):
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         f.write(token)
-    print("Login OK")
 
 
-def cmd_mkdir(path):
-    r = requests.post(f"{CONTROL_NODE_URL}/mkdir", json={"path": path}, headers=_headers())
-    r.raise_for_status()
-    print("OK")
-
-
-def cmd_ls(path="/"):
-    r = requests.get(f"{CONTROL_NODE_URL}/ls", params={"path": path}, headers=_headers())
-    r.raise_for_status()
-    data = r.json()
-    for d in data["dirs"]:
-        print(f"[dir]  {d}")
-    for f in data["files"]:
-        print(f"[file] {f['path']}  ({f['size']} bytes, {f['status']})")
-
-
-def cmd_rm(path):
-    r = requests.post(f"{CONTROL_NODE_URL}/rm", json={"path": path}, headers=_headers())
-    r.raise_for_status()
-    print("OK")
-
-
-def _write_block_to_replicas(block_id: str, data: bytes, replicas: list[str]):
-    checksum = hashlib.sha256(data).hexdigest()
-    ok_count = 0
-    for addr in replicas:
-        try:
-            with grpc.insecure_channel(addr) as channel:
-                stub = dfsha_pb2_grpc.DataNodeStub(channel)
-                ack = stub.WriteBlock(
-                    dfsha_pb2.Block(block_id=block_id, data=data, checksum=checksum),
-                    timeout=10,
-                )
-                if ack.success:
-                    ok_count += 1
-                else:
-                    print(f"  aviso: {addr} rechazó el bloque: {ack.message}")
-        except grpc.RpcError as e:
-            print(f"  aviso: no se pudo escribir en {addr}: {e.details()}")
-    if ok_count == 0:
-        raise RuntimeError(f"bloque {block_id} no se pudo escribir en ninguna réplica")
-    return ok_count
-
-
-def cmd_put(local_path, remote_path):
-    size = os.path.getsize(local_path)
-    r = requests.post(
-        f"{CONTROL_NODE_URL}/files/init",
-        json={"path": remote_path, "size": size},
-        headers=_headers(),
-    )
-    r.raise_for_status()
-    plan = r.json()
-    blocks = plan["blocks"]
-    block_size = size // len(blocks) + 1 if blocks else size
-
-    with open(local_path, "rb") as f:
-        for b in blocks:
-            chunk = f.read(4 * 1024 * 1024)
-            ok = _write_block_to_replicas(b["block_id"], chunk, b["replicas"])
-            print(f"bloque {b['index']}: escrito en {ok}/{len(b['replicas'])} réplicas")
-
-    r = requests.post(f"{CONTROL_NODE_URL}/files/complete", json={"path": remote_path}, headers=_headers())
-    r.raise_for_status()
-    print(f"Subido: {remote_path}")
-
-
-def _read_block_from_replicas(block_id: str, replicas: list[str]) -> bytes:
-    last_error = None
-    for addr in replicas:
-        try:
-            with grpc.insecure_channel(addr) as channel:
-                stub = dfsha_pb2_grpc.DataNodeStub(channel)
-                block = stub.ReadBlock(dfsha_pb2.BlockId(block_id=block_id), timeout=10)
-                if block.checksum and block.checksum != hashlib.sha256(block.data).hexdigest():
-                    raise RuntimeError("checksum no coincide")
-                return block.data
-        except Exception as e:
-            last_error = e
-            continue
-    raise RuntimeError(f"no se pudo leer el bloque {block_id} de ninguna réplica: {last_error}")
-
-
-def cmd_get(remote_path, local_path):
-    r = requests.get(f"{CONTROL_NODE_URL}/files{remote_path}", headers=_headers())
-    r.raise_for_status()
-    meta = r.json()
-
-    with open(local_path, "wb") as out:
-        for b in sorted(meta["blocks"], key=lambda x: x["index"]):
-            data = _read_block_from_replicas(b["block_id"], b["replicas"])
-            out.write(data)
-    print(f"Descargado: {local_path}")
+def run(cmd: str, args: list[str]):
+    if cmd == "register":
+        _client(False).register(args[0], args[1])
+        print("Usuario creado. Ahora puedes hacer login.")
+    elif cmd == "login":
+        otp = args[2] if len(args) > 2 else os.environ.get("DFSHA_OTP")
+        _save_token(_client(False).login(args[0], args[1], otp))
+        print("Login OK")
+    elif cmd == "apikey-login":
+        _save_token(_client(False).login_apikey(args[0]))
+        print("Login OK (API key)")
+    elif cmd == "passwd":
+        _save_token(_client().change_password(args[0], args[1]))
+        print("Contraseña cambiada; las demás sesiones quedaron revocadas")
+    elif cmd == "logout-all":
+        _client().logout_all()
+        os.path.exists(TOKEN_FILE) and os.remove(TOKEN_FILE)
+        print("Todas las sesiones revocadas")
+    elif cmd == "2fa":
+        c = _client()
+        if args[0] == "setup":
+            r = c.totp_setup()
+            print(f"Secreto: {r['secret']}\nURI (escanéala o pégala en tu app de autenticación): {r['uri']}\n"
+                  "Confirma con: python cli.py 2fa enable <codigo>")
+        elif args[0] == "enable":
+            c.totp_enable(args[1]); print("2FA activado")
+        elif args[0] == "disable":
+            c.totp_disable(args[1], args[2] if len(args) > 2 else None); print("2FA desactivado")
+        else:
+            raise IndexError
+    elif cmd == "apikey":
+        c = _client()
+        if args[0] == "create":
+            r = c.apikey_create(args[1] if len(args) > 1 else "")
+            print(f"key_id: {r['key_id']}\nclave: {r['key']}\n(guárdala: no se vuelve a mostrar)")
+        elif args[0] == "list":
+            for k in c.apikey_list():
+                print(f"{k['key_id']}  {k['label'] or '-'}")
+        elif args[0] == "revoke":
+            c.apikey_revoke(args[1]); print("OK")
+        else:
+            raise IndexError
+    elif cmd == "status":
+        st = _client().cluster_status()
+        r = st["raft"]
+        print(f"ControlNode líder: {r['leader']} (término {r['term']}, nodo consultado: {r['self']})")
+        print(f"archivos: {st['files']}  bloques: {st['blocks']}  "
+              f"sub-replicados: {st['under_replicated_blocks']}  perdidos: {st['lost_blocks']}  "
+              f"factor de replicación: {st['replication_factor']}")
+        for n in st["datanodes"]:
+            print(f"  {n['node_id']:<10} {'VIVO ' if n['alive'] else 'CAÍDO'}  {n['blocks']:>5} bloques  "
+                  f"{n['used_bytes'] / 1e6:>9.1f} MB  (visto hace {n['seen_ago']} s)")
+        print(f"seguridad: TLS={'sí' if st['security']['tls'] else 'NO'}"
+              f"{'  (¡secreto de desarrollo!)' if st['security']['dev_secret'] else ''}")
+    elif cmd == "share":
+        _client().share(args[0], args[1], args[2]); print("OK")
+    elif cmd == "acl":
+        for e in _client().acl(args[0]):
+            print(f"{e['principal']}  {e['perm']}")
+    elif cmd == "shared":
+        for e in _client().shared():
+            print(f"[{e['type']}] {e['path']}  ({e['perm']}, dueño: {e['owner']}, vía {e['principal']})")
+    elif cmd == "group":
+        c = _client()
+        if args[0] == "create":
+            c.group_create(args[1]); print("OK")
+        elif args[0] == "ls":
+            for g in c.group_list():
+                print(f"{g['name']}  dueño: {g['owner']}  miembros: {', '.join(g['members'])}")
+        elif args[0] == "add":
+            c.group_add(args[1], args[2]); print("OK")
+        elif args[0] == "remove":
+            c.group_remove(args[1], args[2]); print("OK")
+        elif args[0] == "delete":
+            c.group_delete(args[1]); print("OK")
+        else:
+            raise IndexError
+    elif cmd == "shell":
+        import shell
+        c = _client()
+        shell.run(c, c.username)
+    elif cmd == "mkdir":
+        flags = [a for a in args if a == "-p"]
+        rest = [a for a in args if a != "-p"]
+        (_client().mkdir_p if flags else _client().mkdir)(rest[0]); print("OK")
+    elif cmd == "mv":
+        _client().mv(args[0], args[1]); print("OK")
+    elif cmd == "cp":
+        recursive = "-r" in args
+        rest = [a for a in args if a != "-r"]
+        print(f"OK ({_client().cp(rest[0], rest[1], recursive=recursive)} archivos)")
+    elif cmd == "tree":
+        c = _client()
+        root = args[0] if args else "/"
+        for dirpath, dirs, files in c.walk(root):
+            depth = 0 if dirpath == root else dirpath[len(root.rstrip("/")):].count("/")
+            print("  " * depth + (dirpath.rsplit("/", 1)[1] or "/") + "/")
+            for f in files:
+                print("  " * depth + "  " + f)
+    elif cmd == "rmdir":
+        _client().rmdir(args[0]); print("OK")
+    elif cmd == "rm":
+        rest = [a for a in args if a != "-r"]
+        (_client().rm_tree if "-r" in args else _client().rm)(rest[0]); print("OK")
+    elif cmd == "ls":
+        data = _client().ls(args[0] if args else "/")
+        for d in data["dirs"]:
+            print(f"[dir]  {d}")
+        for f in data["files"]:
+            who = "" if f.get("perm") == "owner" else f"  [{f.get('perm')}, dueño: {f.get('owner')}]"
+            print(f"[file] {f['path']}  ({f['size']} bytes){who}")
+    elif cmd == "put" and ("-r" in args or (len(args) > 0 and os.path.isdir(args[0]))):
+        rest = [a for a in args if a != "-r"]
+        bs = int(os.environ["DFSHA_BLOCK_SIZE"]) if "DFSHA_BLOCK_SIZE" in os.environ else None
+        print(f"{_client().put_tree(rest[0], rest[1], block_size=bs)} archivos subidos a {rest[1]}")
+    elif cmd == "get" and ("-r" in args or _client().kind(args[0]) == "dir"):
+        rest = [a for a in args if a != "-r"]
+        print(f"{_client().get_tree(rest[0], rest[1])} archivos descargados a {rest[1]}")
+    elif cmd == "put":
+        bs = int(os.environ["DFSHA_BLOCK_SIZE"]) if "DFSHA_BLOCK_SIZE" in os.environ else None
+        res = _client().put(
+            args[0], args[1], block_size=bs,
+            progress=lambda i, n, ok, tot: print(f"bloque {i + 1}/{n}: escrito en {ok}/{tot} réplicas"),
+        )
+        extra = f" ({res['under_replicated_blocks']} bloques con réplicas pendientes)" if res.get("under_replicated_blocks") else ""
+        print(f"Subido: {args[1]}{extra}")
+    elif cmd == "get":
+        _client().get(args[0], args[1])
+        print(f"Descargado: {args[1]}")
+    elif cmd == "stat":
+        print(json.dumps(_client().stat(args[0]), indent=2, ensure_ascii=False))
+    elif cmd == "cat":
+        with _client().open(args[0], "r") as f:
+            while chunk := f.read(4 * 1024 * 1024):
+                sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+    elif cmd == "read":
+        with _client().open(args[0], "r") as f:
+            f.seek(int(args[1]))
+            sys.stdout.buffer.write(f.read(int(args[2])))
+            sys.stdout.buffer.flush()
+    elif cmd in ("write", "append"):
+        text = args[-1]
+        data = sys.stdin.buffer.read() if text == "-" else text.encode()
+        client = _client()
+        if cmd == "append":
+            with client.open(args[0], "a") as f:
+                f.write(data)
+        else:
+            try:
+                f = client.open(args[0], "r+")
+            except DFShaError as e:
+                if e.status != 404:
+                    raise
+                f = client.open(args[0], "w+")
+            with f:
+                f.seek(int(args[1]))
+                f.write(data)
+        print(f"OK ({len(data)} bytes)")
+    elif cmd == "truncate":
+        with _client().open(args[0], "r+") as f:
+            f.truncate(int(args[1]))
+        print("OK")
+    elif cmd == "lock":
+        hold = float(args[2]) if len(args) > 2 else 30.0
+        with _client().open(args[0], "r+" if args[1] == "exclusive" else "r", lock=args[1]) as f:
+            print(f"Lock {args[1]} adquirido sobre {args[0]}; se mantiene {hold:g} s (Ctrl+C para soltarlo)")
+            try:
+                time.sleep(hold)
+            except KeyboardInterrupt:
+                pass
+        print("Lock liberado")
+    else:
+        print(__doc__)
+        sys.exit(1)
 
 
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
-
-    cmd, args = sys.argv[1], sys.argv[2:]
     try:
-        if cmd == "register":
-            cmd_register(args[0], args[1])
-        elif cmd == "login":
-            cmd_login(args[0], args[1])
-        elif cmd == "put":
-            cmd_put(args[0], args[1])
-        elif cmd == "get":
-            cmd_get(args[0], args[1])
-        elif cmd == "ls":
-            cmd_ls(args[0] if args else "/")
-        elif cmd == "mkdir":
-            cmd_mkdir(args[0])
-        elif cmd == "rm":
-            cmd_rm(args[0])
-        else:
-            print(__doc__)
-    except requests.HTTPError as e:
-        print(f"Error del ControlNode: {e.response.status_code} {e.response.text}")
+        run(sys.argv[1], sys.argv[2:])
+    except IndexError:
+        print(__doc__)
+        sys.exit(1)
+    except (DFShaError, OSError) as e:
+        print(f"Error: {e}")
         sys.exit(1)
 
 
