@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x64\x66sha.proto\x12\x05\x64\x66sha\"9\n\x05\x42lock\x12\x10\n\x08\x62lock_id\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\"\x1b\n\x07\x42lockId\x12\x10\n\x08\x62lock_id\x18\x01 \x01(\t\"\'\n\x03\x41\x63k\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x07\n\x05\x45mpty2\xaa\x01\n\x08\x44\x61taNode\x12&\n\nWriteBlock\x12\x0c.dfsha.Block\x1a\n.dfsha.Ack\x12)\n\tReadBlock\x12\x0e.dfsha.BlockId\x1a\x0c.dfsha.Block\x12)\n\x0b\x44\x65leteBlock\x12\x0e.dfsha.BlockId\x1a\n.dfsha.Ack\x12 \n\x04Ping\x12\x0c.dfsha.Empty\x1a\n.dfsha.Ackb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x64\x66sha.proto\x12\x05\x64\x66sha\"9\n\x05\x42lock\x12\x10\n\x08\x62lock_id\x18\x01 \x01(\t\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\"\x1b\n\x07\x42lockId\x12\x10\n\x08\x62lock_id\x18\x01 \x01(\t\"y\n\x10ReplicateRequest\x12\x10\n\x08\x62lock_id\x18\x01 \x01(\t\x12\x16\n\x0esource_address\x18\x02 \x01(\t\x12\x10\n\x08\x63hecksum\x18\x03 \x01(\t\x12\x13\n\x0bsource_node\x18\x04 \x01(\t\x12\x14\n\x0csource_token\x18\x05 \x01(\t\"\'\n\x03\x41\x63k\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"\x07\n\x05\x45mpty2\xe1\x01\n\x08\x44\x61taNode\x12&\n\nWriteBlock\x12\x0c.dfsha.Block\x1a\n.dfsha.Ack\x12)\n\tReadBlock\x12\x0e.dfsha.BlockId\x1a\x0c.dfsha.Block\x12)\n\x0b\x44\x65leteBlock\x12\x0e.dfsha.BlockId\x1a\n.dfsha.Ack\x12\x35\n\x0eReplicateBlock\x12\x17.dfsha.ReplicateRequest\x1a\n.dfsha.Ack\x12 \n\x04Ping\x12\x0c.dfsha.Empty\x1a\n.dfsha.Ackb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,10 +35,12 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_BLOCK']._serialized_end=79
   _globals['_BLOCKID']._serialized_start=81
   _globals['_BLOCKID']._serialized_end=108
-  _globals['_ACK']._serialized_start=110
-  _globals['_ACK']._serialized_end=149
-  _globals['_EMPTY']._serialized_start=151
-  _globals['_EMPTY']._serialized_end=158
-  _globals['_DATANODE']._serialized_start=161
-  _globals['_DATANODE']._serialized_end=331
+  _globals['_REPLICATEREQUEST']._serialized_start=110
+  _globals['_REPLICATEREQUEST']._serialized_end=231
+  _globals['_ACK']._serialized_start=233
+  _globals['_ACK']._serialized_end=272
+  _globals['_EMPTY']._serialized_start=274
+  _globals['_EMPTY']._serialized_end=281
+  _globals['_DATANODE']._serialized_start=284
+  _globals['_DATANODE']._serialized_end=509
 # @@protoc_insertion_point(module_scope)

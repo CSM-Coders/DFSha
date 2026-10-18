@@ -26,9 +26,7 @@ if _version_not_supported:
 
 
 class DataNodeStub:
-    """Servicio expuesto por cada DataNode.
-    Cliente -> DataNode: WriteBlock / ReadBlock / DeleteBlock
-    ControlNode -> DataNode: Ping (chequeo de salud, opcional)
+    """fuente única del protocolo grpc, se regenera con scripts/gen_proto.sh (copia dfsha_pb2*.py a client/, control_node/ y data_node/); cada datanode expone dos puertos: el público (tls) para cliente -> datanode con WriteBlock/ReadBlock y el interno (mtls) para control node -> datanode con DeleteBlock/ReplicateBlock/Ping y datanode -> datanode con ReadBlock (dentro de ReplicateBlock el destino jala el bloque de un origen sano); toda operación sobre un bloque exige un token de acceso (x-dfsha-token) firmado por el control node
     """
 
     def __init__(self, channel):
@@ -52,6 +50,11 @@ class DataNodeStub:
                 request_serializer=dfsha__pb2.BlockId.SerializeToString,
                 response_deserializer=dfsha__pb2.Ack.FromString,
                 _registered_method=True)
+        self.ReplicateBlock = channel.unary_unary(
+                '/dfsha.DataNode/ReplicateBlock',
+                request_serializer=dfsha__pb2.ReplicateRequest.SerializeToString,
+                response_deserializer=dfsha__pb2.Ack.FromString,
+                _registered_method=True)
         self.Ping = channel.unary_unary(
                 '/dfsha.DataNode/Ping',
                 request_serializer=dfsha__pb2.Empty.SerializeToString,
@@ -60,9 +63,7 @@ class DataNodeStub:
 
 
 class DataNodeServicer:
-    """Servicio expuesto por cada DataNode.
-    Cliente -> DataNode: WriteBlock / ReadBlock / DeleteBlock
-    ControlNode -> DataNode: Ping (chequeo de salud, opcional)
+    """fuente única del protocolo grpc, se regenera con scripts/gen_proto.sh (copia dfsha_pb2*.py a client/, control_node/ y data_node/); cada datanode expone dos puertos: el público (tls) para cliente -> datanode con WriteBlock/ReadBlock y el interno (mtls) para control node -> datanode con DeleteBlock/ReplicateBlock/Ping y datanode -> datanode con ReadBlock (dentro de ReplicateBlock el destino jala el bloque de un origen sano); toda operación sobre un bloque exige un token de acceso (x-dfsha-token) firmado por el control node
     """
 
     def WriteBlock(self, request, context):
@@ -79,6 +80,13 @@ class DataNodeServicer:
 
     def DeleteBlock(self, request, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReplicateBlock(self, request, context):
+        """le ordena a este datanode copiar un bloque desde source_address (re-replicación)
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -107,6 +115,11 @@ def add_DataNodeServicer_to_server(servicer, server):
                     request_deserializer=dfsha__pb2.BlockId.FromString,
                     response_serializer=dfsha__pb2.Ack.SerializeToString,
             ),
+            'ReplicateBlock': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReplicateBlock,
+                    request_deserializer=dfsha__pb2.ReplicateRequest.FromString,
+                    response_serializer=dfsha__pb2.Ack.SerializeToString,
+            ),
             'Ping': grpc.unary_unary_rpc_method_handler(
                     servicer.Ping,
                     request_deserializer=dfsha__pb2.Empty.FromString,
@@ -121,9 +134,7 @@ def add_DataNodeServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class DataNode:
-    """Servicio expuesto por cada DataNode.
-    Cliente -> DataNode: WriteBlock / ReadBlock / DeleteBlock
-    ControlNode -> DataNode: Ping (chequeo de salud, opcional)
+    """fuente única del protocolo grpc, se regenera con scripts/gen_proto.sh (copia dfsha_pb2*.py a client/, control_node/ y data_node/); cada datanode expone dos puertos: el público (tls) para cliente -> datanode con WriteBlock/ReadBlock y el interno (mtls) para control node -> datanode con DeleteBlock/ReplicateBlock/Ping y datanode -> datanode con ReadBlock (dentro de ReplicateBlock el destino jala el bloque de un origen sano); toda operación sobre un bloque exige un token de acceso (x-dfsha-token) firmado por el control node
     """
 
     @staticmethod
@@ -196,6 +207,33 @@ class DataNode:
             target,
             '/dfsha.DataNode/DeleteBlock',
             dfsha__pb2.BlockId.SerializeToString,
+            dfsha__pb2.Ack.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReplicateBlock(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/dfsha.DataNode/ReplicateBlock',
+            dfsha__pb2.ReplicateRequest.SerializeToString,
             dfsha__pb2.Ack.FromString,
             options,
             channel_credentials,
