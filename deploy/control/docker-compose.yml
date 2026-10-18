@@ -1,0 +1,26 @@
+# un control node por vm (3 vms para aguantar la caída de una), las variables van en deploy/control/.env (ver deploy/env.example)
+services:
+  control:
+    build: ../../control_node
+    restart: unless-stopped
+    ports:
+      - "8000:8000"      # api rest (clientes y datanodes)
+      - "4321:4321"      # raft entre control nodes (solo entre ellos)
+    environment:
+      CLUSTER_SECRET: ${CLUSTER_SECRET:?define CLUSTER_SECRET}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      RAFT_SELF: ${PRIVATE_IP:?define PRIVATE_IP}:4321
+      RAFT_PEERS: ${RAFT_PEERS:?define RAFT_PEERS}  # las ips privadas de los otros dos, con :4321
+      TLS_CA: /certs/ca.crt
+      TLS_CERT: /certs/node.crt
+      TLS_KEY: /certs/node.key
+    volumes:
+      - control_data:/data
+      - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,ssl; urllib.request.urlopen('https://localhost:8000/health', context=ssl.create_default_context(cafile='/certs/ca.crt'))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+volumes:
+  control_data:

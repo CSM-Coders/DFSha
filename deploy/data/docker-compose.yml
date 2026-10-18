@@ -1,0 +1,23 @@
+# un datanode por vm (mínimo 2, mejor 3 o más), las variables van en deploy/data/.env (ver deploy/env.example)
+services:
+  datanode:
+    build: ../../data_node
+    restart: unless-stopped
+    ports:
+      - "6000:6000"      # grpc público con tls, lo usan los clientes con un token de bloque
+      - "6100:6100"      # grpc interno con mtls, solo control nodes y otros datanodes
+    environment:
+      CLUSTER_SECRET: ${CLUSTER_SECRET:?define CLUSTER_SECRET}
+      DATA_KEY: ${DATA_KEY:-}
+      NODE_ID: ${NODE_ID:?define NODE_ID}
+      NODE_ADDR: ${PUBLIC_IP:?define PUBLIC_IP}:6000  # lo que ven los clientes (ip pública o dns)
+      INTERNAL_ADDR: ${PRIVATE_IP:?define PRIVATE_IP}:6100  # lo que ven los demás nodos (ip privada)
+      CONTROL_NODE_URLS: ${CONTROL_NODE_URLS:?define CONTROL_NODE_URLS}
+      TLS_CA: /certs/ca.crt
+      TLS_CERT: /certs/node.crt
+      TLS_KEY: /certs/node.key
+    volumes:
+      - data:/data
+      - ./certs:/certs:ro
+volumes:
+  data:
